@@ -10,6 +10,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
     <link rel="stylesheet" href="style.css">
   </head>
   <body>
@@ -74,28 +76,35 @@
             <div class="stats-grid" aria-label="Road safety summary">
               <article class="stat-card">
                 <div class="stat-card-top"><span class="stat-label">Total pothole reports</span><span class="stat-icon stat-icon-blue" aria-hidden="true">◉</span></div>
-                <div class="stat-value" data-stat="total">0</div><div class="stat-footnote">All saved reports</div>
+                <div class="stat-value" data-stat="total">0</div><div class="stat-footnote">All saved reports</div><div class="stat-change" data-stat-change="total">— vs previous 7 days</div>
               </article>
               <article class="stat-card">
                 <div class="stat-card-top"><span class="stat-label">Verified reports</span><span class="stat-icon stat-icon-green" aria-hidden="true">✓</span></div>
-                <div class="stat-value" data-stat="verified">0</div><div class="stat-footnote">Reviewed by an administrator</div>
+                <div class="stat-value" data-stat="verified">0</div><div class="stat-footnote">Reviewed by an administrator</div><div class="stat-change" data-stat-change="verified">— vs previous 7 days</div>
               </article>
               <article class="stat-card">
                 <div class="stat-card-top"><span class="stat-label">Unverified reports</span><span class="stat-icon stat-icon-orange" aria-hidden="true">◷</span></div>
-                <div class="stat-value" data-stat="unverified">0</div><div class="stat-footnote">Awaiting authority review</div>
+                <div class="stat-value" data-stat="unverified">0</div><div class="stat-footnote">Awaiting authority review</div><div class="stat-change" data-stat-change="unverified">— vs previous 7 days</div>
               </article>
               <article class="stat-card">
                 <div class="stat-card-top"><span class="stat-label">Active vehicles</span><span class="stat-icon stat-icon-blue" aria-hidden="true">▣</span></div>
-                <div class="stat-value" data-stat="vehicles">0</div><div class="stat-footnote">Simulated network vehicles</div>
+                <div class="stat-value" data-stat="vehicles">0</div><div class="stat-footnote">Simulated network vehicles</div><div class="stat-change" data-stat-change="vehicles">Fleet size · 3 registered</div>
               </article>
               <article class="stat-card">
                 <div class="stat-card-top"><span class="stat-label">High-risk locations</span><span class="stat-icon stat-icon-orange" aria-hidden="true">▲</span></div>
-                <div class="stat-value" data-stat="high-risk">0</div><div class="stat-footnote">Priority score of 70 or higher</div>
+                <div class="stat-value" data-stat="high-risk">0</div><div class="stat-footnote">Priority score of 70 or higher</div><div class="stat-change" data-stat-change="high-risk">— vs previous 7 days</div>
               </article>
               <article class="stat-card">
                 <div class="stat-card-top"><span class="stat-label">Repaired potholes</span><span class="stat-icon stat-icon-green" aria-hidden="true">✓</span></div>
-                <div class="stat-value" data-stat="repaired">0</div><div class="stat-footnote">Marked repaired in the portal</div>
+                <div class="stat-value" data-stat="repaired">0</div><div class="stat-footnote">Marked repaired in the portal</div><div class="stat-change" data-stat-change="repaired">— vs previous 7 days</div>
               </article>
+            </div>
+            <div class="condition-strip" id="road-condition-summary" aria-live="polite">
+              <span class="condition-strip-label">ROAD CONDITION</span>
+              <span><i class="legend-dot legend-high"></i><strong data-condition="active">0</strong> active hazards</span>
+              <span><i class="legend-dot legend-medium"></i><strong data-condition="pending">0</strong> awaiting review</span>
+              <span><i class="legend-dot legend-vehicle"></i><strong data-condition="repair">0</strong> in repair</span>
+              <span><i class="legend-dot legend-repaired"></i><strong data-condition="repaired">0</strong> repaired</span>
             </div>
           </section>
 
@@ -109,9 +118,14 @@
                       <option value="all">All severities</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option>
                     </select>
                   </label>
-                  <label class="select-label" for="map-status-filter">Status
+                  <label class="select-label" for="map-status-filter">Verification / repair status
                     <select class="select-control" id="map-status-filter" data-map-filter="status">
                       <option value="all">All statuses</option><option value="pending">Pending</option><option value="verified">Verified</option><option value="in-progress">In progress</option><option value="repaired">Repaired</option><option value="rejected">Rejected</option>
+                    </select>
+                  </label>
+                  <label class="select-label" for="map-date-filter">Reported
+                    <select class="select-control" id="map-date-filter" data-map-filter="date">
+                      <option value="all">Any time</option><option value="24h">Last 24 hours</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option>
                     </select>
                   </label>
                 </div>
@@ -121,6 +135,9 @@
               <div class="map-legend" aria-label="Map legend">
                 <span><i class="legend-dot legend-high"></i>High</span><span><i class="legend-dot legend-medium"></i>Medium</span><span><i class="legend-dot legend-low"></i>Low</span><span><i class="legend-dot legend-vehicle"></i>Simulated vehicle</span><span><i class="legend-dot legend-repaired"></i>Repaired</span>
               </div>
+              <section class="map-detail" id="map-report-details" aria-live="polite" aria-label="Selected report details">
+                <div class="map-detail-empty"><strong>Select a map marker</strong><span>Report coordinates, severity, date and repair status will appear here.</span></div>
+              </section>
             </article>
             <article class="panel activity-panel">
               <div class="panel-header"><div><p class="eyebrow">LATEST UPDATES</p><h2>Recent activity</h2><p class="panel-subtitle">New reports and authority status changes.</p></div><span class="live-indicator"><span class="status-dot"></span>LOCAL</span></div>
@@ -134,7 +151,7 @@
             <article class="panel network-panel">
               <div class="panel-header">
                 <div><p class="eyebrow">CONNECTED FLEET</p><h2 id="network-title">Vehicle network</h2><p class="panel-subtitle">Vehicles move only while the local simulation is running.</p></div>
-                <div class="network-controls"><button class="button button-primary" id="start-simulation" data-action="start-simulation" type="button">Start simulation</button><button class="button button-secondary" id="stop-simulation" data-action="stop-simulation" type="button" disabled>Stop</button></div>
+                <div class="network-controls"><button class="button button-primary" id="start-simulation" data-action="start-simulation" type="button">Start simulation</button><button class="button button-secondary" id="stop-simulation" data-action="pause-simulation" type="button" disabled>Pause</button><button class="button button-secondary" id="reset-simulation" data-action="reset-simulation" type="button">Reset</button></div>
               </div>
               <div class="network-summary">
                 <div><strong class="network-metric" id="vehicle-count">3</strong><span class="network-metric-label">vehicles</span></div>
@@ -190,7 +207,7 @@
             <div class="panel-header"><div><p class="eyebrow">TRANSPARENT PRIORITIZATION</p><h2 id="analytics-title">Road risk analytics</h2><p class="panel-subtitle">Prototype scores use severity, repeat reports, and recency only—never weather.</p></div><span class="source-badge">PROTOTYPE SCORE · 0–100</span></div>
             <div class="analytics-grid">
               <article class="chart-card"><div class="chart-heading"><div><h3>Reports by severity</h3><p>Click a segment or legend item to filter the map.</p></div></div><div class="chart-container"><canvas id="severity-chart" role="img" aria-label="Reports by severity chart"></canvas><p class="chart-fallback" id="severity-chart-fallback" hidden>Chart unavailable.</p></div><div class="chart-legend" id="severity-legend"></div></article>
-              <article class="chart-card"><div class="chart-heading"><div><h3>Reports over time</h3><p>Click a day to filter the authority table for that date.</p></div><span class="chart-unit">7 DAYS</span></div><div class="chart-container"><canvas id="timeline-chart" role="img" aria-label="Reports over time chart"></canvas><p class="chart-fallback" id="timeline-chart-fallback" hidden>Chart unavailable.</p></div></article>
+              <article class="chart-card"><div class="chart-heading"><div><h3>Reports over time</h3><p>Choose daily, weekly or monthly trends. Select a bar to filter reports.</p></div><label class="visually-hidden" for="trend-period">Trend period</label><select class="select-control trend-period" id="trend-period"><option value="daily">Daily</option><option value="weekly" selected>Weekly</option><option value="monthly">Monthly</option></select></div><div class="chart-container"><canvas id="timeline-chart" role="img" aria-label="Reports over time chart"></canvas><p class="chart-fallback" id="timeline-chart-fallback" hidden>Chart unavailable.</p></div></article>
               <article class="risk-insight-card"><span class="insight-icon" aria-hidden="true">↗</span><p class="eyebrow">HIGHEST PRIORITY</p><h3 id="top-risk-location">No high-priority location</h3><p id="top-risk-explanation">Locations are ranked by severity, report count, and report recency.</p><a class="text-link" href="#authority">Review reports <span aria-hidden="true">→</span></a></article>
             </div>
             <div class="risk-method"><strong>How the score works</strong><p>Each location score is the highest active report severity (low 20, medium 50, high 80), plus up to 10 points for repeat reports and up to 10 points for recency (reported within 24 hours: 10; within 7 days: 5), capped at 100. Repaired and rejected reports are excluded. This is a transparent demonstration heuristic, not a validated engineering assessment.</p></div>
@@ -211,12 +228,17 @@
             </div>
             <div class="table-wrap">
               <table class="reports-table">
-                <thead><tr><th scope="col">Report</th><th scope="col">Location</th><th scope="col">Severity</th><th scope="col">Risk score</th><th scope="col">Reported</th><th scope="col">Status</th><th scope="col">Repair note</th><th scope="col">Actions</th></tr></thead>
+                <thead><tr><th scope="col">Report</th><th scope="col">Location</th><th scope="col">Severity</th><th scope="col">Risk score</th><th scope="col">Reported</th><th scope="col">Source / vehicle</th><th scope="col">Status</th><th scope="col">Assign repair</th><th scope="col">Repair note</th><th scope="col">Actions</th></tr></thead>
                 <tbody id="reports-table-body" data-report-list></tbody>
               </table>
             </div>
             <p class="empty-state" id="reports-empty" hidden>No reports match your search and status filter.</p>
             <div class="table-footer"><span id="report-count-label">0 reports</span><span>Changes are saved in this browser's local storage.</span></div>
+            <section class="repair-history-section" aria-labelledby="repair-history-title">
+              <div class="repair-history-heading"><h3 id="repair-history-title">Repair history</h3><span>Latest report and authority updates</span></div>
+              <ol class="repair-history-list" id="repair-history-list" aria-live="polite"></ol>
+              <p class="empty-state" id="repair-history-empty" hidden>No repair actions have been recorded.</p>
+            </section>
           </section>
 
           <footer class="page-footer"><span>RoadGuard · Intelligent road-safety prototype</span><span>Simulated detections are not real hardware data.</span></footer>
@@ -225,6 +247,7 @@
     </div>
     <div class="toast-region" id="toast-region" aria-live="polite" aria-atomic="true"></div>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
     <script src="script.js"></script>
   </body>
