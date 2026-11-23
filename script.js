@@ -61,6 +61,7 @@
     { id: "vehicle-2", name: "Vehicle 2", latitude: 40.718, longitude: -74.012, heading: 220, speed: 27, lastReportAt: "" },
     { id: "vehicle-3", name: "Vehicle 3", latitude: 40.707, longitude: -74.001, heading: 90, speed: 35, lastReportAt: "" }
   ];
+  const REPAIR_TEAMS = ["Roads crew A", "Roads crew B", "Roads crew C"];
   const STATUS_LABELS = {
     pending: "Pending",
     verified: "Verified",
@@ -82,10 +83,13 @@
     reportMarkers: null,
     vehicleMarkers: null,
     charts: {},
+    trendBuckets: [],
     timer: null,
+    simulationState: "stopped",
     weatherTimer: null,
     simulationTicks: 0,
-    selectedDay: null,
+    selectedRange: null,
+    selectedReportId: null,
     weatherRequest: 0,
     alertKeys: new Set()
   };
@@ -150,6 +154,20 @@
     if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90 ||
         !Number.isFinite(longitude) || longitude < -180 || longitude > 180) return null;
     const status = normalizeStatus(report.status);
+    const reportedAt = validDate(report.reportedAt) ? report.reportedAt : new Date().toISOString();
+    const history = Array.isArray(report.history) ? report.history.filter(item =>
+      item && validDate(item.createdAt) && typeof item.action === "string"
+    ).map(item => ({
+      action: String(item.action).slice(0, 120),
+      status: normalizeStatus(item.status),
+      createdAt: item.createdAt,
+      note: String(item.note || "").slice(0, 240)
+    })) : [{
+      action: "Report imported",
+      status,
+      createdAt: validDate(report.updatedAt) ? report.updatedAt : reportedAt,
+      note: ""
+    }];
     return {
       ...report,
       id: String(report.id || `saved-${index}-${makeId()}`),
@@ -160,8 +178,10 @@
       severity: normalizeSeverity(report.severity),
       status,
       description: String(report.description || ""),
-      reportedAt: validDate(report.reportedAt) ? report.reportedAt : new Date().toISOString(),
+      reportedAt,
       repairNote: String(report.repairNote || ""),
+      repairAssignedTo: REPAIR_TEAMS.includes(report.repairAssignedTo) ? report.repairAssignedTo : "",
+      history,
       simulated: report.simulated === true
     };
   }
@@ -239,7 +259,7 @@
   }
 
   function saveReports() {
-    writeJSON(STORAGE.reports, app.reports);
+    return writeJSON(STORAGE.reports, app.reports);
   }
 
   function showMessage(message, type = "info") {
@@ -288,9 +308,9 @@
     return label || `${Number(report.latitude).toFixed(3)},${Number(report.longitude).toFixed(3)}`;
   }
 
-  function calculateLocationRisks() {
+  function calculateLocationRisks(sourceReports = app.reports) {
     const groups = new Map();
-    app.reports.filter(isActiveReport).forEach(report => {
+    sourceReports.filter(isActiveReport).forEach(report => {
       const key = locationKey(report);
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(report);
@@ -336,8 +356,7 @@
     ].join(" ").toLocaleLowerCase();
     return (!query || searchable.includes(query)) &&
       (status === "all" || normalizeStatus(report.status) === status) &&
-      (!app.selectedDay || (reportDate >= app.selectedDay &&
-        reportDate < new Date(app.selectedDay.getTime() + 86_400_000)));
+      (!app.selectedRange || (reportDate >= app.selectedRange.start && reportDate < app.selectedRange.end));
   }
 
   function renderReports() {
@@ -349,20 +368,31 @@
     body.innerHTML = visible.map(report => {
       const severity = normalizeSeverity(report.severity);
       const status = normalizeStatus(report.status);
-      const source = report.simulated
+      const sourceBadge = report.simulated
         ? '<span class="report-source">SIMULATED DATA</span>'
         : '<span class="report-source">MANUAL REPORT</span>';
       const risk = riskScoreFor(report, risks);
       const options = Object.entries(STATUS_LABELS).map(([value, label]) =>
         `<option value="${value}"${status === value ? " selected" : ""}>${label}</option>`
       ).join("");
+      const assignmentOptions = [
+        `<option value=""${report.repairAssignedTo ? "" : " selected"}>Unassigned</option>`,
+        ...REPAIR_TEAMS.map(team =>
+          `<option value="${escapeHTML(team)}"${report.repairAssignedTo === team ? " selected" : ""}>${escapeHTML(team)}</option>`
+        )
+      ].join("");
+      const vehicleSource = report.detectedBy
+        ? app.vehicles.find(vehicle => vehicle.id === report.detectedBy)?.name || report.detectedBy
+        : report.simulated ? "Simulated sample" : "Manual report";
       return `<tr data-report-id="${escapeHTML(report.id)}">
-        <td><span class="report-id">${escapeHTML(report.id.slice(0, 12))}</span>${source}</td>
+        <td><span class="report-id">${escapeHTML(report.id.slice(0, 12))}</span>${sourceBadge}</td>
         <td><span class="table-location">${escapeHTML(report.location)}</span><span class="table-subtext">${Number(report.latitude).toFixed(4)}, ${Number(report.longitude).toFixed(4)}</span></td>
         <td><span class="risk-badge risk-badge-${severity}">${severity[0].toUpperCase()}${severity.slice(1)}</span></td>
         <td><span class="risk-score">${risk}<small>/100</small></span></td>
         <td><time datetime="${escapeHTML(report.reportedAt)}">${escapeHTML(formatDate(report.reportedAt))}</time></td>
+        <td>${escapeHTML(vehicleSource)}</td>
         <td><label class="visually-hidden" for="status-${escapeHTML(report.id)}">Status for ${escapeHTML(report.title)}</label><select class="status-select" id="status-${escapeHTML(report.id)}" data-report-status="${escapeHTML(report.id)}">${options}</select></td>
+        <td><label class="visually-hidden" for="assignment-${escapeHTML(report.id)}">Assign repair crew for ${escapeHTML(report.title)}</label><select class="status-select" id="assignment-${escapeHTML(report.id)}" data-repair-assignment="${escapeHTML(report.id)}">${assignmentOptions}</select></td>
         <td><label class="visually-hidden" for="note-${escapeHTML(report.id)}">Repair note for ${escapeHTML(report.title)}</label><input class="repair-note-input" id="note-${escapeHTML(report.id)}" data-repair-note="${escapeHTML(report.id)}" maxlength="240" value="${escapeHTML(report.repairNote)}" placeholder="Add repair note"></td>
         <td><div class="row-actions">
           <button class="table-action" type="button" data-report-action="verify" data-report-id="${escapeHTML(report.id)}">Verify</button>
@@ -376,13 +406,14 @@
     if (empty) empty.hidden = visible.length > 0;
     const count = $("#report-count-label");
     if (count) {
-      const dateLabel = app.selectedDay
-        ? ` on ${app.selectedDay.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
+      const dateLabel = app.selectedRange
+        ? ` · ${app.selectedRange.label}`
         : "";
       count.textContent = `${visible.length} of ${app.reports.length} report${app.reports.length === 1 ? "" : "s"}${dateLabel}`;
     }
     updateDashboard(risks);
     renderActivity();
+    renderRepairHistory();
     renderMap();
     renderAnalytics(risks);
   }
@@ -392,6 +423,10 @@
     const unverified = app.reports.filter(report => normalizeStatus(report.status) === "pending").length;
     const repaired = app.reports.filter(report => normalizeStatus(report.status) === "repaired").length;
     const highRisk = risks.filter(location => location.score >= 70).length;
+    const now = new Date();
+    const currentStart = new Date(now.getTime() - 7 * 86_400_000);
+    const previousStart = new Date(now.getTime() - 14 * 86_400_000);
+    const currentEnd = new Date(now.getTime() + 1);
     const stats = {
       total: app.reports.length,
       verified,
@@ -404,6 +439,29 @@
       const target = $(`[data-stat="${name}"]`);
       if (target) target.textContent = String(value);
     });
+    ["total", "verified", "unverified", "high-risk", "repaired"].forEach(name => {
+      const current = reportEventsInRange(name, currentStart, currentEnd);
+      const previous = reportEventsInRange(name, previousStart, currentStart);
+      const target = $(`[data-stat-change="${name}"]`);
+      if (!target) return;
+      const change = formatChange(current, previous);
+      target.textContent = `${change} · ${current} this week vs ${previous} prior`;
+      const improved = ["verified", "repaired"].includes(name) ? current > previous : current < previous;
+      target.classList.toggle("is-positive", improved);
+      target.classList.toggle("is-negative", current !== previous && !improved && name !== "total");
+    });
+    const fleetChange = $(`[data-stat-change="vehicles"]`);
+    if (fleetChange) fleetChange.textContent = `${app.timer ? app.vehicles.length : 0} active · ${app.vehicles.length} registered`;
+    const conditions = {
+      active: app.reports.filter(isActiveReport).length,
+      pending: app.reports.filter(report => normalizeStatus(report.status) === "pending").length,
+      repair: app.reports.filter(report => normalizeStatus(report.status) === "in-progress").length,
+      repaired
+    };
+    Object.entries(conditions).forEach(([name, value]) => {
+      const target = $(`[data-condition="${name}"]`);
+      if (target) target.textContent = String(value);
+    });
     const vehicleCount = $("#vehicle-count");
     if (vehicleCount) vehicleCount.textContent = String(app.vehicles.length);
     const networkReports = $("#network-report-count");
@@ -411,7 +469,7 @@
     const running = Boolean(app.timer);
     const simStatus = $("#simulation-status");
     const simDot = $("#simulation-status-dot");
-    if (simStatus) simStatus.textContent = running ? "Simulation running" : "Simulation stopped";
+    if (simStatus) simStatus.textContent = running ? "Simulation running" : `Simulation ${app.simulationState}`;
     if (simDot) simDot.classList.toggle("is-stopped", !running);
     const start = $("#start-simulation");
     const stop = $("#stop-simulation");
@@ -430,6 +488,59 @@
     if (empty) empty.hidden = app.activity.length > 0;
   }
 
+  function renderRepairHistory() {
+    const list = $("#repair-history-list");
+    if (!list) return;
+    const updates = app.reports.flatMap(report => (report.history || []).map(item => ({
+      ...item,
+      location: report.location,
+      reportId: report.id
+    }))).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 10);
+    list.innerHTML = updates.map(item =>
+      `<li><div><strong>${escapeHTML(item.action)}</strong><span>${escapeHTML(item.location)} · ${escapeHTML(STATUS_LABELS[item.status] || "Report update")}</span></div><time datetime="${escapeHTML(item.createdAt)}">${escapeHTML(formatRelative(item.createdAt))}</time></li>`
+    ).join("");
+    const empty = $("#repair-history-empty");
+    if (empty) empty.hidden = updates.length > 0;
+  }
+
+  function reportEventsInRange(metric, start, end) {
+    if (metric === "high-risk") {
+      const reports = app.reports.filter(report =>
+        isActiveReport(report) && new Date(report.reportedAt) >= start && new Date(report.reportedAt) < end
+      );
+      return calculateLocationRisks(reports).filter(location => location.score >= 70).length;
+    }
+    return app.reports.reduce((count, report) => {
+      if (metric === "total" && new Date(report.reportedAt) >= start && new Date(report.reportedAt) < end) return count + 1;
+      if (metric === "unverified" && new Date(report.reportedAt) >= start && new Date(report.reportedAt) < end) {
+        count += 1;
+      }
+      const history = (report.history || []).slice().sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+      let previousStatus = null;
+      history.forEach(item => {
+        if (!item.action.startsWith("Status changed")) {
+          previousStatus = item.status;
+          return;
+        }
+        const verifiedStatus = ["verified", "in-progress", "repaired"];
+        const enteredVerified = verifiedStatus.includes(item.status) && !verifiedStatus.includes(previousStatus);
+        const enteredPending = item.status === "pending" && previousStatus !== "pending";
+        const inRange = new Date(item.createdAt) >= start && new Date(item.createdAt) < end;
+        if (inRange && ((metric === "verified" && enteredVerified) ||
+            (metric === "unverified" && enteredPending) ||
+            (metric === "repaired" && item.status === "repaired" && previousStatus !== "repaired"))) count += 1;
+        previousStatus = item.status;
+      });
+      return count;
+    }, 0);
+  }
+
+  function formatChange(current, previous) {
+    if (previous === 0) return current === 0 ? "0%" : "New";
+    const change = Math.round(((current - previous) / previous) * 100);
+    return `${change > 0 ? "+" : ""}${change}%`;
+  }
+
   function initMap() {
     const mapNode = $("#road-map");
     const fallback = $("#map-fallback");
@@ -442,27 +553,70 @@
       }
       return;
     }
-    app.map = L.map(mapNode, { scrollWheelZoom: false }).setView(
-      [Number(app.settings.latitude), Number(app.settings.longitude)], 13
-    );
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    try {
+      app.map = L.map(mapNode, { scrollWheelZoom: false }).setView(
+        [Number(app.settings.latitude), Number(app.settings.longitude)], 13
+      );
+    } catch (error) {
+      console.error("RoadGuard: Could not initialize the map.", error);
+      if (fallback) {
+        fallback.hidden = false;
+        fallback.querySelector("p").textContent = "Map could not be initialized.";
+        fallback.querySelector("span:last-child").textContent = "Reports remain available in the authority table.";
+      }
+      return;
+    }
+    const tileLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors'
-    }).addTo(app.map);
-    app.reportMarkers = L.layerGroup().addTo(app.map);
+    });
+    tileLayer.on("load", () => {
+      if (fallback) fallback.hidden = true;
+    });
+    tileLayer.on("tileerror", () => {
+      if (!fallback) return;
+      fallback.hidden = false;
+      fallback.querySelector("p").textContent = "Map tiles could not be loaded.";
+      fallback.querySelector("span:last-child").textContent = "Check your internet connection. Saved reports are still available below.";
+    });
+    tileLayer.addTo(app.map);
+    app.reportMarkers = typeof L.markerClusterGroup === "function"
+      ? L.markerClusterGroup({ showCoverageOnHover: false, maxClusterRadius: 44 }).addTo(app.map)
+      : L.layerGroup().addTo(app.map);
     app.vehicleMarkers = L.layerGroup().addTo(app.map);
-    if (fallback) fallback.hidden = true;
     window.setTimeout(() => app.map?.invalidateSize(), 100);
   }
 
   function reportPassesMapFilters(report) {
     const severity = $("#map-severity-filter")?.value || "all";
     const status = $("#map-status-filter")?.value || "all";
+    const dateRange = $("#map-date-filter")?.value || "all";
     const query = String($("#map-search")?.value || "").trim().toLocaleLowerCase();
     const locationText = `${report.location} ${report.title} ${report.id}`.toLocaleLowerCase();
+    const age = Date.now() - new Date(report.reportedAt).getTime();
     return (severity === "all" || normalizeSeverity(report.severity) === severity) &&
       (status === "all" || normalizeStatus(report.status) === status) &&
+      (dateRange === "all" || (dateRange === "24h" && age <= 86_400_000) ||
+        (dateRange === "7d" && age <= 7 * 86_400_000) ||
+        (dateRange === "30d" && age <= 30 * 86_400_000)) &&
       (!query || locationText.includes(query));
+  }
+
+  function showReportDetails(report) {
+    const target = $("#map-report-details");
+    if (!target) return;
+    app.selectedReportId = report.id;
+    const status = normalizeStatus(report.status);
+    const source = report.simulated ? "Simulated report" : "Manual report";
+    const latestHistory = (report.history || []).slice(-3).reverse();
+    target.innerHTML = `
+      <div class="map-detail-heading"><div><p class="eyebrow">SELECTED HAZARD · ${escapeHTML(source)}</p><h3>${escapeHTML(report.title)}</h3></div><span class="risk-badge risk-badge-${status === "repaired" ? "low" : normalizeSeverity(report.severity)}">${escapeHTML(STATUS_LABELS[status])}</span></div>
+      <p class="map-detail-location">${escapeHTML(report.location)}</p>
+      <div class="map-detail-meta"><span><small>Coordinates</small>${Number(report.latitude).toFixed(5)}, ${Number(report.longitude).toFixed(5)}</span><span><small>Severity</small>${escapeHTML(normalizeSeverity(report.severity))}</span><span><small>Reported</small>${escapeHTML(formatDate(report.reportedAt))}</span><span><small>Repair assignment</small>${escapeHTML(report.repairAssignedTo || "Unassigned")}</span></div>
+      ${report.description ? `<p class="map-detail-description">${escapeHTML(report.description)}</p>` : ""}
+      ${report.repairNote ? `<p class="map-detail-note"><strong>Repair note:</strong> ${escapeHTML(report.repairNote)}</p>` : ""}
+      <ol class="map-detail-history">${latestHistory.map(item => `<li>${escapeHTML(item.action)} · ${escapeHTML(formatRelative(item.createdAt))}</li>`).join("")}</ol>
+      <a class="text-link" href="#authority">Open in authority portal <span aria-hidden="true">→</span></a>`;
   }
 
   function makeReportIcon(report) {
@@ -486,10 +640,11 @@
       const simulated = report.simulated
         ? '<span class="simulated-badge">SIMULATED REPORT</span>'
         : '<span class="simulated-badge">MANUAL REPORT</span>';
-      const popup = `<div class="map-popup"><strong>${escapeHTML(report.title)}</strong><span>${escapeHTML(report.location)}</span><span>Severity: ${escapeHTML(normalizeSeverity(report.severity))}</span><span>Status: ${escapeHTML(STATUS_LABELS[normalizeStatus(report.status)])}</span><span>Reported: ${escapeHTML(formatDate(report.reportedAt))}</span>${simulated}</div>`;
-      L.marker([Number(report.latitude), Number(report.longitude)], { icon: makeReportIcon(report) })
+      const popup = `<div class="map-popup"><strong>${escapeHTML(report.title)}</strong><span>${escapeHTML(report.location)}</span><span>Coordinates: ${Number(report.latitude).toFixed(5)}, ${Number(report.longitude).toFixed(5)}</span><span>Severity: ${escapeHTML(normalizeSeverity(report.severity))}</span><span>Status: ${escapeHTML(STATUS_LABELS[normalizeStatus(report.status)])}</span><span>Reported: ${escapeHTML(formatDate(report.reportedAt))}</span>${report.repairNote ? `<span>Repair note: ${escapeHTML(report.repairNote)}</span>` : ""}${simulated}</div>`;
+      const marker = L.marker([Number(report.latitude), Number(report.longitude)], { icon: makeReportIcon(report) })
         .bindPopup(popup)
-        .addTo(app.reportMarkers);
+        .on("click", () => showReportDetails(report));
+      app.reportMarkers.addLayer(marker);
     });
     app.vehicles.forEach(vehicle => {
       const icon = L.divIcon({
@@ -499,10 +654,19 @@
         iconAnchor: [12, 12]
       });
       L.marker([vehicle.latitude, vehicle.longitude], { icon })
-        .bindPopup(`<div class="map-popup"><strong>${escapeHTML(vehicle.name)}</strong><span>Simulated vehicle · ${app.timer ? "moving" : "standby"}</span><span>${vehicle.latitude.toFixed(5)}, ${vehicle.longitude.toFixed(5)}</span></div>`)
+        .bindPopup(`<div class="map-popup"><strong>${escapeHTML(vehicle.name)} · ${escapeHTML(vehicle.id)}</strong><span>Simulated vehicle · ${app.timer ? "moving" : escapeHTML(app.simulationState)}</span><span>Speed: ${Math.round(vehicle.speed)} km/h</span><span>${vehicle.latitude.toFixed(5)}, ${vehicle.longitude.toFixed(5)}</span></div>`)
         .addTo(app.vehicleMarkers);
     });
     const query = String($("#map-search")?.value || "").trim().toLocaleLowerCase();
+    if (app.selectedReportId) {
+      const selected = matching.find(report => report.id === app.selectedReportId);
+      if (selected) showReportDetails(selected);
+      else {
+        app.selectedReportId = null;
+        const details = $("#map-report-details");
+        if (details) details.innerHTML = '<div class="map-detail-empty"><strong>No selected report</strong><span>The selected report is hidden by the current map filters.</span></div>';
+      }
+    }
     if (query) {
       const match = matching[0];
       if (match) app.map.setView([Number(match.latitude), Number(match.longitude)], Math.max(app.map.getZoom(), 15));
@@ -518,34 +682,41 @@
   }
 
   function renderAnalytics(risks = calculateLocationRisks()) {
-    const activeReports = app.reports.filter(isActiveReport);
     const severityCounts = ["high", "medium", "low"].map(severity =>
-      activeReports.filter(report => normalizeSeverity(report.severity) === severity).length
+      app.reports.filter(report => normalizeSeverity(report.severity) === severity).length
     );
     const severityLabels = ["High", "Medium", "Low"];
     const colors = [SEVERITY_COLORS.high, SEVERITY_COLORS.medium, SEVERITY_COLORS.low];
     const severityCanvas = $("#severity-chart");
     const severityFallback = $("#severity-chart-fallback");
     if (window.Chart && severityCanvas) {
-      if (!app.charts.severity) {
-        app.charts.severity = new Chart(severityCanvas, {
-          type: "doughnut",
-          data: { labels: severityLabels, datasets: [{ data: severityCounts, backgroundColor: colors, borderColor: "#101c2d", borderWidth: 3, hoverOffset: 5 }] },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            cutout: "64%",
-            plugins: { legend: { display: false } },
-            onClick: (_event, elements) => {
-              if (elements.length) severityFilterFromChart(["high", "medium", "low"][elements[0].index]);
+      try {
+        if (!app.charts.severity) {
+          app.charts.severity = new Chart(severityCanvas, {
+            type: "doughnut",
+            data: { labels: severityLabels, datasets: [{ data: severityCounts, backgroundColor: colors, borderColor: "#101c2d", borderWidth: 3, hoverOffset: 5 }] },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              cutout: "64%",
+              plugins: { legend: { display: false } },
+              onClick: (_event, elements) => {
+                if (elements.length) severityFilterFromChart(["high", "medium", "low"][elements[0].index]);
+              }
             }
-          }
-        });
-      } else {
-        app.charts.severity.data.datasets[0].data = severityCounts;
-        app.charts.severity.update();
+          });
+        } else {
+          app.charts.severity.data.datasets[0].data = severityCounts;
+          app.charts.severity.update();
+        }
+        if (severityFallback) severityFallback.hidden = true;
+      } catch (error) {
+        console.error("RoadGuard: Could not render the severity chart.", error);
+        if (severityFallback) {
+          severityFallback.hidden = false;
+          severityFallback.textContent = "Severity chart unavailable. Reports are still available in the table.";
+        }
       }
-      if (severityFallback) severityFallback.hidden = true;
     } else if (severityFallback) {
       severityFallback.hidden = false;
       severityFallback.textContent = "Chart library unavailable. Reports are still available in the table.";
@@ -559,48 +730,92 @@
 
     const timelineCanvas = $("#timeline-chart");
     const timelineFallback = $("#timeline-chart-fallback");
-    const days = Array.from({ length: 7 }, (_unused, index) => {
-      const date = new Date();
-      date.setHours(0, 0, 0, 0);
-      date.setDate(date.getDate() - (6 - index));
-      return date;
-    });
-    const dayCounts = days.map(day => app.reports.filter(report => {
+    const period = $("#trend-period")?.value || "weekly";
+    const now = new Date();
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    if (period === "daily") {
+      const start = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      app.trendBuckets = Array.from({ length: 12 }, (_unused, index) => {
+        const bucketStart = new Date(start.getTime() + index * 2 * 60 * 60 * 1000);
+        const bucketEnd = new Date(bucketStart.getTime() + 2 * 60 * 60 * 1000);
+        return {
+          start: bucketStart,
+          end: bucketEnd,
+          label: bucketStart.toLocaleTimeString(undefined, { hour: "numeric" })
+        };
+      });
+    } else if (period === "monthly") {
+      const start = new Date(today);
+      start.setDate(start.getDate() - 27);
+      app.trendBuckets = Array.from({ length: 4 }, (_unused, index) => {
+        const bucketStart = new Date(start);
+        bucketStart.setDate(start.getDate() + index * 7);
+        const bucketEnd = new Date(bucketStart);
+        bucketEnd.setDate(bucketEnd.getDate() + 7);
+        const bucketLastDay = new Date(bucketEnd.getTime() - 1);
+        const label = `${bucketStart.toLocaleDateString(undefined, { month: "short", day: "numeric" })}–${bucketLastDay.toLocaleDateString(undefined, { day: "numeric" })}`;
+        return { start: bucketStart, end: bucketEnd, label };
+      });
+    } else {
+      app.trendBuckets = Array.from({ length: 7 }, (_unused, index) => {
+        const bucketStart = new Date(today);
+        bucketStart.setDate(today.getDate() - (6 - index));
+        const bucketEnd = new Date(bucketStart);
+        bucketEnd.setDate(bucketEnd.getDate() + 1);
+        return {
+          start: bucketStart,
+          end: bucketEnd,
+          label: bucketStart.toLocaleDateString(undefined, { weekday: "short" })
+        };
+      });
+    }
+    const trendCounts = app.trendBuckets.map(bucket => app.reports.filter(report => {
       const reported = new Date(report.reportedAt);
-      return reported >= day && reported < new Date(day.getTime() + 86_400_000);
+      return reported >= bucket.start && reported < bucket.end;
     }).length);
-    const dayLabels = days.map(day => day.toLocaleDateString(undefined, { weekday: "short" }));
+    const trendLabels = app.trendBuckets.map(bucket => bucket.label);
     if (window.Chart && timelineCanvas) {
-      if (!app.charts.timeline) {
-        app.charts.timeline = new Chart(timelineCanvas, {
-          type: "bar",
-          data: { labels: dayLabels, datasets: [{ data: dayCounts, backgroundColor: "#4b9cff", borderRadius: 4, maxBarThickness: 25 }] },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: { legend: { display: false } },
-            scales: {
-              x: { grid: { display: false }, ticks: { color: "#9aacc2", font: { size: 9 } } },
-              y: { beginAtZero: true, ticks: { precision: 0, color: "#71849c", font: { size: 9 } }, grid: { color: "rgba(148,173,205,.12)" } }
-            },
-            onClick: (_event, elements) => {
-              if (!elements.length) return;
-              app.selectedDay = days[elements[0].index];
-              const search = $("#report-search");
-              const status = $("#report-filter");
-              if (search) search.value = "";
-              if (status) status.value = "all";
-              renderReports();
-              $("#authority")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      try {
+        if (!app.charts.timeline) {
+          app.charts.timeline = new Chart(timelineCanvas, {
+            type: "bar",
+            data: { labels: trendLabels, datasets: [{ data: trendCounts, backgroundColor: "#4b9cff", borderRadius: 4, maxBarThickness: 25 }] },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { display: false } },
+              scales: {
+                x: { grid: { display: false }, ticks: { color: "#9aacc2", font: { size: 9 } } },
+                y: { beginAtZero: true, ticks: { precision: 0, color: "#71849c", font: { size: 9 } }, grid: { color: "rgba(148,173,205,.12)" } }
+              },
+              onClick: (_event, elements) => {
+                if (!elements.length) return;
+                const bucket = app.trendBuckets[elements[0].index];
+                if (!bucket) return;
+                app.selectedRange = { start: bucket.start, end: bucket.end, label: bucket.label };
+                const search = $("#report-search");
+                const status = $("#report-filter");
+                if (search) search.value = "";
+                if (status) status.value = "all";
+                renderReports();
+                $("#authority")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }
             }
-          }
-        });
-      } else {
-        app.charts.timeline.data.labels = dayLabels;
-        app.charts.timeline.data.datasets[0].data = dayCounts;
-        app.charts.timeline.update();
+          });
+        } else {
+          app.charts.timeline.data.labels = trendLabels;
+          app.charts.timeline.data.datasets[0].data = trendCounts;
+          app.charts.timeline.update();
+        }
+        if (timelineFallback) timelineFallback.hidden = true;
+      } catch (error) {
+        console.error("RoadGuard: Could not render the report trend chart.", error);
+        if (timelineFallback) {
+          timelineFallback.hidden = false;
+          timelineFallback.textContent = "Trend chart unavailable. Reports are still available in the table.";
+        }
       }
-      if (timelineFallback) timelineFallback.hidden = true;
     } else if (timelineFallback) {
       timelineFallback.hidden = false;
       timelineFallback.textContent = "Chart library unavailable.";
@@ -629,13 +844,23 @@
   function renderVehicles() {
     const target = $("#vehicle-list");
     if (!target) return;
-    target.innerHTML = app.vehicles.map(vehicle => `
-      <article class="vehicle-card" data-vehicle-id="${escapeHTML(vehicle.id)}">
-        <div class="vehicle-card-heading"><strong>${escapeHTML(vehicle.name)}</strong><span class="vehicle-badge">SIMULATED</span></div>
-        <p>${vehicle.latitude.toFixed(5)}, ${vehicle.longitude.toFixed(5)}</p>
-        <div class="vehicle-meta-row"><span>${Math.round(vehicle.speed)} km/h</span><span class="vehicle-status${app.timer ? "" : " is-stopped"}"><i class="status-dot"></i>${app.timer ? "Active" : "Standby"}</span></div>
-        <p>Last report: ${vehicle.lastReportAt ? escapeHTML(formatRelative(vehicle.lastReportAt)) : "No reports yet"}</p>
-      </article>`).join("");
+    target.innerHTML = app.vehicles.map(vehicle => {
+      const detections = app.reports.filter(report => report.detectedBy === vehicle.id)
+        .sort((a, b) => new Date(b.reportedAt) - new Date(a.reportedAt));
+      const status = app.timer ? "Moving" : app.simulationState === "paused" ? "Paused" : "Standby";
+      const lastDetection = detections[0];
+      return `
+        <article class="vehicle-card" data-vehicle-id="${escapeHTML(vehicle.id)}">
+          <div class="vehicle-card-heading"><strong>${escapeHTML(vehicle.name)}</strong><span class="vehicle-badge">SIMULATED</span></div>
+          <p class="vehicle-id">ID · ${escapeHTML(vehicle.id)}</p>
+          <p>${vehicle.latitude.toFixed(5)}, ${vehicle.longitude.toFixed(5)}</p>
+          <div class="vehicle-meta-row"><span>${Math.round(vehicle.speed)} km/h</span><span class="vehicle-status${app.timer ? "" : " is-stopped"}"><i class="status-dot"></i>${status}</span></div>
+          <p>Last detection: ${lastDetection ? escapeHTML(formatRelative(lastDetection.reportedAt)) : "No reports yet"}</p>
+          <div class="vehicle-detection-history"><strong>${detections.length} detection${detections.length === 1 ? "" : "s"}</strong>${detections.slice(0, 2).map(report =>
+            `<button type="button" data-vehicle-report-id="${escapeHTML(report.id)}">${escapeHTML(report.location)} · ${escapeHTML(formatRelative(report.reportedAt))}</button>`
+          ).join("") || "<span>No simulated detections</span>"}</div>
+        </article>`;
+    }).join("");
     updateDashboard(calculateLocationRisks());
   }
 
@@ -749,11 +974,21 @@
   }
 
   function addReport(report) {
+    report.history = [{
+      action: "Report created",
+      status: normalizeStatus(report.status),
+      createdAt: report.reportedAt,
+      note: ""
+    }];
     app.reports.unshift(report);
-    saveReports();
+    if (!saveReports()) {
+      app.reports.shift();
+      return false;
+    }
     addActivity(`${report.simulated ? "Simulated detection" : "New manual report"}: ${report.location}.`, "report");
     renderReports();
     checkNearbyHazards();
+    return true;
   }
 
   function generateSimulatedReport() {
@@ -775,8 +1010,9 @@
       simulated: true,
       detectedBy: vehicle.id
     };
+    if (!addReport(report)) return null;
     vehicle.lastReportAt = reportedAt;
-    addReport(report);
+    saveVehicles();
     showMessage(`Simulated ${severity}-severity pothole report generated by ${vehicle.name}.`, severity === "high" ? "warning" : "success");
     renderVehicles();
     return report;
@@ -784,6 +1020,7 @@
 
   function startSimulation() {
     if (app.timer) return;
+    app.simulationState = "running";
     app.timer = window.setInterval(moveVehicles, SIMULATION_INTERVAL_MS);
     renderVehicles();
     renderMap();
@@ -791,13 +1028,26 @@
     showMessage("Vehicle simulation started. All vehicle activity and detections are simulated.", "info");
   }
 
-  function stopSimulation() {
+  function pauseSimulation() {
     if (!app.timer) return;
     window.clearInterval(app.timer);
     app.timer = null;
+    app.simulationState = "paused";
     renderVehicles();
     renderMap();
-    showMessage("Vehicle simulation stopped. Existing reports and positions are retained.", "info");
+    showMessage("Vehicle simulation paused. Positions and reports are retained.", "info");
+  }
+
+  function resetSimulation() {
+    if (app.timer) window.clearInterval(app.timer);
+    app.timer = null;
+    app.simulationState = "stopped";
+    app.simulationTicks = 0;
+    app.vehicles = DEFAULT_VEHICLES.map(vehicle => ({ ...vehicle }));
+    saveVehicles();
+    renderVehicles();
+    renderMap();
+    showMessage("Vehicle positions reset. Saved reports and history were retained.", "info");
   }
 
   function setReportStatus(id, value) {
@@ -812,13 +1062,26 @@
       return false;
     }
     const previous = normalizeStatus(report.status);
+    const previousVerifiedAt = report.verifiedAt;
     report.status = status;
     report.updatedAt = new Date().toISOString();
     if (["verified", "in-progress", "repaired"].includes(status) && !report.verifiedAt) {
       report.verifiedAt = report.updatedAt;
     }
     if (status === "pending") delete report.verifiedAt;
-    saveReports();
+    report.history ||= [];
+    report.history.push({
+      action: `Status changed to ${STATUS_LABELS[status]}`,
+      status,
+      createdAt: report.updatedAt,
+      note: ""
+    });
+    if (!saveReports()) {
+      report.status = previous;
+      report.verifiedAt = previousVerifiedAt;
+      report.history.pop();
+      return false;
+    }
     addActivity(`${report.title} status changed from ${STATUS_LABELS[previous]} to ${STATUS_LABELS[status]}.`, "status");
     renderReports();
     showMessage(`Report status updated to ${STATUS_LABELS[status]}.`, "success");
@@ -832,12 +1095,53 @@
       showMessage("Could not save this repair note. Refresh the report list and try again.", "error");
       return;
     }
+    const previousNote = report.repairNote;
     report.repairNote = String(input.value || "").trim().slice(0, 240);
     report.updatedAt = new Date().toISOString();
-    saveReports();
+    report.history ||= [];
+    report.history.push({
+      action: "Repair note updated",
+      status: normalizeStatus(report.status),
+      createdAt: report.updatedAt,
+      note: report.repairNote
+    });
+    if (!saveReports()) {
+      report.repairNote = previousNote;
+      report.history.pop();
+      renderReports();
+      return;
+    }
     addActivity(`Repair note updated for ${report.location}.`, "status");
     renderReports();
     showMessage("Repair note saved.", "success");
+  }
+
+  function saveRepairAssignment(id, assignment) {
+    const report = app.reports.find(item => item.id === id);
+    if (!report || (assignment && !REPAIR_TEAMS.includes(assignment))) {
+      showMessage("Choose a valid repair crew for this report.", "error");
+      renderReports();
+      return;
+    }
+    const previous = report.repairAssignedTo || "";
+    report.repairAssignedTo = assignment;
+    report.updatedAt = new Date().toISOString();
+    report.history ||= [];
+    report.history.push({
+      action: assignment ? `Assigned to ${assignment}` : "Repair assignment cleared",
+      status: normalizeStatus(report.status),
+      createdAt: report.updatedAt,
+      note: ""
+    });
+    if (!saveReports()) {
+      report.repairAssignedTo = previous;
+      report.history.pop();
+      renderReports();
+      return;
+    }
+    addActivity(`${report.location} ${assignment ? `assigned to ${assignment}` : "repair assignment cleared"}.`, "status");
+    renderReports();
+    showMessage(assignment ? `Assigned to ${assignment}.` : "Repair assignment cleared.", "success");
   }
 
   function submitReport(form) {
@@ -879,7 +1183,7 @@
       reportedAt: new Date().toISOString(),
       simulated: false
     };
-    addReport(report);
+    if (!addReport(report)) return;
     form.reset();
     latitudeField.value = String(app.settings.latitude);
     longitudeField.value = String(app.settings.longitude);
@@ -989,12 +1293,12 @@
   }
 
   function clearFilters() {
-    app.selectedDay = null;
+    app.selectedRange = null;
     ["#report-search", "#map-search"].forEach(selector => {
       const input = $(selector);
       if (input) input.value = "";
     });
-    ["#report-filter", "#map-severity-filter", "#map-status-filter"].forEach(selector => {
+    ["#report-filter", "#map-severity-filter", "#map-status-filter", "#map-date-filter"].forEach(selector => {
       const select = $(selector);
       if (select) select.value = "all";
     });
@@ -1015,9 +1319,10 @@
       const id = decodeURIComponent(link.getAttribute("href").slice(1));
       const target = document.getElementById(id);
       if (!target) return;
-      $$(".nav-link").forEach(item => item.classList.toggle("active", item === link));
+      const activeLink = $$(".nav-link").find(item => item.getAttribute("href") === `#${id}`);
+      $$(".nav-link").forEach(item => item.classList.toggle("active", item === activeLink));
       const breadcrumb = $("#breadcrumb-current");
-      if (breadcrumb) breadcrumb.textContent = link.textContent.trim() || "Dashboard";
+      if (breadcrumb) breadcrumb.textContent = activeLink?.textContent.trim() || link.textContent.trim() || "Dashboard";
       sidebar?.classList.remove("is-open");
       menuButton?.setAttribute("aria-expanded", "false");
       menuButton?.setAttribute("aria-label", "Open navigation");
@@ -1050,20 +1355,36 @@
       loadWeather();
     });
     $("#start-simulation")?.addEventListener("click", startSimulation);
-    $("#stop-simulation")?.addEventListener("click", stopSimulation);
+    $("#stop-simulation")?.addEventListener("click", pauseSimulation);
+    $("#reset-simulation")?.addEventListener("click", resetSimulation);
     $("#generate-report")?.addEventListener("click", generateSimulatedReport);
 
     $("#report-search")?.addEventListener("input", () => {
-      app.selectedDay = null;
+      app.selectedRange = null;
       renderReports();
     });
     $("#report-filter")?.addEventListener("change", () => {
-      app.selectedDay = null;
+      app.selectedRange = null;
       renderReports();
     });
     $("#map-search")?.addEventListener("input", renderMap);
     $$("[data-map-filter]").forEach(select => select.addEventListener("change", renderMap));
     $("#clear-report-filters")?.addEventListener("click", clearFilters);
+    $("#trend-period")?.addEventListener("change", () => renderAnalytics());
+    $("#vehicle-list")?.addEventListener("click", event => {
+      const button = event.target.closest("[data-vehicle-report-id]");
+      if (!button) return;
+      const report = app.reports.find(item => item.id === button.dataset.vehicleReportId);
+      if (!report || !app.map) return;
+      ["#map-search", "#map-severity-filter", "#map-status-filter", "#map-date-filter"].forEach(selector => {
+        const control = $(selector);
+        if (control) control.value = selector === "#map-search" ? "" : "all";
+      });
+      renderMap();
+      app.map.setView([report.latitude, report.longitude], Math.max(app.map.getZoom(), 15));
+      showReportDetails(report);
+      $("#live-map")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
 
     $("#audio-alert-toggle")?.addEventListener("change", event => {
       app.settings.audibleAlerts = event.currentTarget.checked;
@@ -1074,6 +1395,8 @@
     $("#reports-table-body")?.addEventListener("change", event => {
       const select = event.target.closest("[data-report-status]");
       if (select) setReportStatus(select.dataset.reportStatus, select.value);
+      const assignment = event.target.closest("[data-repair-assignment]");
+      if (assignment) saveRepairAssignment(assignment.dataset.repairAssignment, assignment.value);
     });
     $("#reports-table-body")?.addEventListener("click", event => {
       const button = event.target.closest("[data-report-action]");
@@ -1097,7 +1420,9 @@
       getAlerts: () => app.alerts.map(alert => ({ ...alert })),
       submitSimulatedReport: generateSimulatedReport,
       startSimulation,
-      stopSimulation,
+      pauseSimulation,
+      stopSimulation: pauseSimulation,
+      resetSimulation,
       refreshWeather: loadWeather,
       calculateRiskPriority: riskScoreFor,
       updateReportStatus: setReportStatus
