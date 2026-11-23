@@ -1,0 +1,615 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#0b1220">
+  <meta
+    name="description"
+    content="RoadGuard is a college ideathon project dashboard for simulated pothole detection and road safety."
+  >
+  <title>RoadGuard | Road Safety Network</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap"
+    rel="stylesheet"
+  >
+
+  <!-- Leaflet styles for the interactive map -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  >
+  <link rel="stylesheet" href="style.css">
+
+  <!-- Leaflet library for the interactive map -->
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin=""
+    defer
+  ></script>
+  <script src="script.js" defer></script>
+</head>
+
+<body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+
+  <div class="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="Main navigation">
+      <a class="brand" href="#overview" aria-label="RoadGuard home">
+        <span class="brand-mark" aria-hidden="true">R</span>
+        <span class="brand-copy">
+          <span class="brand-name">RoadGuard</span>
+          <span class="brand-caption">ROAD SAFETY NETWORK</span>
+        </span>
+      </a>
+
+      <div class="sidebar-section-label">Workspace</div>
+      <nav class="primary-nav">
+        <a class="nav-link active" href="#overview" aria-current="page">
+          <span class="nav-icon" aria-hidden="true">▦</span>
+          <span>Overview</span>
+        </a>
+        <a class="nav-link" href="#live-map">
+          <span class="nav-icon" aria-hidden="true">⌖</span>
+          <span>Live map</span>
+        </a>
+        <a class="nav-link" href="#vehicle-network">
+          <span class="nav-icon" aria-hidden="true">⌁</span>
+          <span>Vehicle network</span>
+        </a>
+        <a class="nav-link" href="#risk-analytics">
+          <span class="nav-icon" aria-hidden="true">▤</span>
+          <span>Risk analytics</span>
+        </a>
+        <a class="nav-link" href="#authority-portal">
+          <span class="nav-icon" aria-hidden="true">▣</span>
+          <span>Authority portal</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-section-label">Project</div>
+      <div class="project-note">
+        <span class="project-note-icon" aria-hidden="true">i</span>
+        <p>
+          <strong>Ideathon demo</strong>
+          <span>Dashboard values and vehicle activity are simulated.</span>
+        </p>
+      </div>
+
+      <div class="sidebar-bottom">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span>Prototype mode</span>
+      </div>
+    </aside>
+
+    <div class="main-column">
+      <header class="topbar">
+        <button
+          class="icon-button menu-button"
+          id="menu-toggle"
+          type="button"
+          aria-label="Toggle navigation menu"
+          aria-expanded="false"
+          aria-controls="sidebar"
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
+
+        <div class="breadcrumb">
+          <span>RoadGuard</span>
+          <span class="breadcrumb-divider" aria-hidden="true">/</span>
+          <strong>Overview</strong>
+        </div>
+
+        <div class="topbar-actions">
+          <span class="demo-badge">
+            <span class="status-dot" aria-hidden="true"></span>
+            SIMULATED DATA
+          </span>
+          <button class="profile-button" type="button" aria-label="Demo account">
+            <span class="profile-avatar" aria-hidden="true">RG</span>
+            <span class="profile-name">Demo account</span>
+          </button>
+        </div>
+      </header>
+
+      <main id="main-content" class="dashboard">
+        <section class="page-heading" id="overview">
+          <div>
+            <p class="eyebrow">ROAD SAFETY INTELLIGENCE</p>
+            <h1>Overview dashboard</h1>
+            <p class="page-description">
+              A prototype view of road hazards, connected vehicles, and response activity.
+            </p>
+          </div>
+          <div class="heading-actions">
+            <span class="updated-label" id="last-updated">Demo data · not live</span>
+            <button class="button button-primary" id="refresh-dashboard" type="button">
+              <span aria-hidden="true">↻</span>
+              Refresh demo
+            </button>
+          </div>
+        </section>
+
+        <div class="simulation-banner" role="note">
+          <span class="banner-icon" aria-hidden="true">ⓘ</span>
+          <p>
+            <strong>Prototype notice:</strong>
+            All pothole reports, vehicle locations, alerts, and repair figures on this page are
+            simulated for demonstration. They are not verified real-world road conditions.
+          </p>
+        </div>
+
+        <section class="stats-grid" aria-label="Simulated pothole statistics">
+          <article class="stat-card">
+            <div class="stat-card-top">
+              <span class="stat-label">Reported potholes</span>
+              <span class="stat-icon stat-icon-blue" aria-hidden="true">⌖</span>
+            </div>
+            <div class="stat-value" id="stat-reported">128</div>
+            <div class="stat-footnote">
+              <span class="stat-trend">+12</span>
+              <span>in the last 7 demo days</span>
+            </div>
+          </article>
+
+          <article class="stat-card">
+            <div class="stat-card-top">
+              <span class="stat-label">High-risk locations</span>
+              <span class="stat-icon stat-icon-orange" aria-hidden="true">!</span>
+            </div>
+            <div class="stat-value" id="stat-high-risk">23</div>
+            <div class="stat-footnote">Simulated risk classification</div>
+          </article>
+
+          <article class="stat-card">
+            <div class="stat-card-top">
+              <span class="stat-label">Repairs completed</span>
+              <span class="stat-icon stat-icon-green" aria-hidden="true">✓</span>
+            </div>
+            <div class="stat-value" id="stat-repaired">76</div>
+            <div class="stat-footnote">
+              <span class="stat-trend positive">59%</span>
+              <span>of demo reports</span>
+            </div>
+          </article>
+
+          <article class="stat-card">
+            <div class="stat-card-top">
+              <span class="stat-label">Connected vehicles</span>
+              <span class="stat-icon stat-icon-purple" aria-hidden="true">⌁</span>
+            </div>
+            <div class="stat-value" id="stat-vehicles">18</div>
+            <div class="stat-footnote">Vehicles in network simulation</div>
+          </article>
+        </section>
+
+        <div class="dashboard-grid">
+          <section class="panel map-panel" id="live-map" aria-labelledby="map-title">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">GEOGRAPHIC VIEW</p>
+                <h2 id="map-title">Live hazard map</h2>
+                <p class="panel-subtitle">Illustrative demo locations · OpenStreetMap</p>
+              </div>
+              <div class="map-header-actions">
+                <label class="select-label" for="map-filter">Show</label>
+                <select id="map-filter" class="select-control">
+                  <option value="all">All reports</option>
+                  <option value="high">High risk</option>
+                  <option value="medium">Medium risk</option>
+                  <option value="low">Low risk</option>
+                </select>
+              </div>
+            </div>
+
+            <div
+              id="map"
+              class="map-container"
+              role="application"
+              aria-label="Interactive map displaying simulated pothole report markers"
+            >
+              <div class="map-fallback">
+                <span class="map-fallback-icon" aria-hidden="true">⌖</span>
+                <p>Map will load here</p>
+                <span>Leaflet and OpenStreetMap</span>
+              </div>
+            </div>
+
+            <div class="map-legend" aria-label="Map marker legend">
+              <span><i class="legend-dot legend-high"></i>High risk</span>
+              <span><i class="legend-dot legend-medium"></i>Medium risk</span>
+              <span><i class="legend-dot legend-low"></i>Low risk</span>
+              <span><i class="legend-dot legend-vehicle"></i>Demo vehicle</span>
+            </div>
+          </section>
+
+          <section class="panel alerts-panel" aria-labelledby="alerts-title">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">NETWORK ACTIVITY</p>
+                <h2 id="alerts-title">Hazard alerts</h2>
+              </div>
+              <span class="live-indicator">
+                <span class="status-dot" aria-hidden="true"></span>
+                SIMULATED
+              </span>
+            </div>
+
+            <div class="alert-list" id="alert-list" aria-live="polite">
+              <article class="alert-item alert-critical">
+                <span class="alert-severity" aria-hidden="true">!</span>
+                <div class="alert-content">
+                  <div class="alert-title-row">
+                    <h3>High-risk road segment</h3>
+                    <time datetime="2026-11-23T10:42">10:42</time>
+                  </div>
+                  <p>Demo vehicle RG-04 warning · Central Avenue</p>
+                  <span class="alert-tag">HIGH RISK · SIMULATED</span>
+                </div>
+              </article>
+
+              <article class="alert-item alert-warning">
+                <span class="alert-severity" aria-hidden="true">!</span>
+                <div class="alert-content">
+                  <div class="alert-title-row">
+                    <h3>Hazard shared vehicle-to-vehicle</h3>
+                    <time datetime="2026-11-23T10:38">10:38</time>
+                  </div>
+                  <p>Demo alert relayed to 3 nearby vehicles</p>
+                  <span class="alert-tag">V2V DEMO</span>
+                </div>
+              </article>
+
+              <article class="alert-item alert-info">
+                <span class="alert-severity" aria-hidden="true">i</span>
+                <div class="alert-content">
+                  <div class="alert-title-row">
+                    <h3>New report added</h3>
+                    <time datetime="2026-11-23T10:31">10:31</time>
+                  </div>
+                  <p>Simulated report · Riverside Road</p>
+                  <span class="alert-tag">AWAITING REVIEW</span>
+                </div>
+              </article>
+            </div>
+
+            <a class="text-link" href="#authority-portal">
+              View all reports <span aria-hidden="true">→</span>
+            </a>
+          </section>
+        </div>
+
+        <div class="dashboard-grid secondary-grid">
+          <section class="panel network-panel" id="vehicle-network" aria-labelledby="network-title">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">CONNECTED MOBILITY</p>
+                <h2 id="network-title">Vehicle network simulation</h2>
+                <p class="panel-subtitle">Illustrative vehicle activity, not GPS tracking</p>
+              </div>
+              <button
+                class="button button-secondary"
+                id="simulation-toggle"
+                type="button"
+                aria-pressed="false"
+              >
+                Start simulation
+              </button>
+            </div>
+
+            <div class="network-summary">
+              <div>
+                <span class="network-metric" id="network-active-count">18</span>
+                <span class="network-metric-label">demo vehicles</span>
+              </div>
+              <div>
+                <span class="network-metric" id="network-alert-count">04</span>
+                <span class="network-metric-label">hazard alerts shared</span>
+              </div>
+              <div class="network-status">
+                <span class="status-dot" aria-hidden="true"></span>
+                <span id="network-status-text">Simulation paused</span>
+              </div>
+            </div>
+
+            <div
+              class="network-visual"
+              id="network-visual"
+              aria-label="Illustration of simulated vehicles sharing a road hazard warning"
+            >
+              <div class="network-road" aria-hidden="true">
+                <span class="road-lane-mark"></span>
+                <span class="road-lane-mark"></span>
+                <span class="road-lane-mark"></span>
+              </div>
+              <div class="network-node vehicle-node node-one" aria-hidden="true">V1</div>
+              <div class="network-node vehicle-node node-two" aria-hidden="true">V2</div>
+              <div class="network-node vehicle-node node-three" aria-hidden="true">V3</div>
+              <div class="network-node hazard-node" aria-hidden="true">!</div>
+              <div class="network-connection connection-one" aria-hidden="true"></div>
+              <div class="network-connection connection-two" aria-hidden="true"></div>
+              <div class="network-connection connection-three" aria-hidden="true"></div>
+              <span class="network-caption">Vehicle-to-vehicle warning path · demo only</span>
+            </div>
+
+            <div class="network-message" id="network-message" aria-live="polite">
+              <span class="message-icon" aria-hidden="true">↗</span>
+              <span>Example: a vehicle detects a simulated hazard and shares a warning with nearby vehicles.</span>
+            </div>
+          </section>
+
+          <section class="panel weather-panel" aria-labelledby="weather-title">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">WEATHER CONTEXT</p>
+                <h2 id="weather-title">Weather &amp; rainfall</h2>
+              </div>
+              <span class="source-badge">OPEN-METEO</span>
+            </div>
+
+            <div class="weather-location">
+              <span class="weather-location-icon" aria-hidden="true">⌖</span>
+              <label for="weather-location">Demo location</label>
+              <select id="weather-location" class="select-control">
+                <option value="12.9716,77.5946">Bengaluru</option>
+                <option value="19.0760,72.8777">Mumbai</option>
+                <option value="28.6139,77.2090">New Delhi</option>
+                <option value="13.0827,80.2707">Chennai</option>
+              </select>
+            </div>
+
+            <div class="weather-main" id="weather-data" aria-live="polite">
+              <div class="weather-icon" aria-hidden="true">☁</div>
+              <div>
+                <div class="weather-temperature">
+                  <span id="weather-temperature">--</span><span class="temperature-unit">°C</span>
+                </div>
+                <p id="weather-description">Weather data loads with JavaScript</p>
+              </div>
+            </div>
+
+            <div class="weather-details">
+              <div class="weather-detail">
+                <span class="weather-detail-label">Rainfall</span>
+                <strong id="weather-rainfall">-- mm</strong>
+              </div>
+              <div class="weather-detail">
+                <span class="weather-detail-label">Wind speed</span>
+                <strong id="weather-wind">-- km/h</strong>
+              </div>
+              <div class="weather-detail">
+                <span class="weather-detail-label">Humidity</span>
+                <strong id="weather-humidity">--%</strong>
+              </div>
+            </div>
+
+            <p class="data-source-note">
+              Weather information is intended to be fetched from Open-Meteo. RoadGuard does not
+              detect road conditions from weather data.
+            </p>
+          </section>
+        </div>
+
+        <section class="panel analytics-panel" id="risk-analytics" aria-labelledby="analytics-title">
+          <div class="panel-header">
+            <div>
+              <p class="eyebrow">RISK INTELLIGENCE</p>
+              <h2 id="analytics-title">Pothole risk analytics</h2>
+              <p class="panel-subtitle">Illustrative demo analysis based on simulated reports</p>
+            </div>
+            <label class="select-label" for="analytics-period">
+              Time period
+              <select id="analytics-period" class="select-control">
+                <option value="7">Last 7 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="90">Last 90 days</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="analytics-grid">
+            <article class="chart-card">
+              <div class="chart-heading">
+                <div>
+                  <h3>Risk distribution</h3>
+                  <p>Simulated report severity</p>
+                </div>
+                <span class="chart-unit">REPORTS</span>
+              </div>
+              <div class="chart-container">
+                <canvas
+                  id="risk-chart"
+                  role="img"
+                  aria-label="Chart of simulated high, medium, and low risk reports"
+                ></canvas>
+                <p class="chart-fallback">Risk distribution chart will appear here.</p>
+              </div>
+              <div class="chart-legend">
+                <span><i class="legend-dot legend-high"></i>High <strong>23</strong></span>
+                <span><i class="legend-dot legend-medium"></i>Medium <strong>54</strong></span>
+                <span><i class="legend-dot legend-low"></i>Low <strong>51</strong></span>
+              </div>
+            </article>
+
+            <article class="chart-card">
+              <div class="chart-heading">
+                <div>
+                  <h3>Reports over time</h3>
+                  <p>Example weekly activity</p>
+                </div>
+                <span class="chart-unit">REPORTS</span>
+              </div>
+              <div class="chart-container">
+                <canvas
+                  id="reports-chart"
+                  role="img"
+                  aria-label="Chart of example simulated pothole reports over time"
+                ></canvas>
+                <p class="chart-fallback">Reports-over-time chart will appear here.</p>
+              </div>
+              <div class="chart-legend">
+                <span><i class="legend-dot legend-line"></i>Simulated reports</span>
+              </div>
+            </article>
+
+            <article class="risk-insight-card">
+              <span class="insight-icon" aria-hidden="true">✦</span>
+              <p class="eyebrow">DEMO INSIGHT</p>
+              <h3>Rainfall can increase road risk</h3>
+              <p>
+                This prototype can display weather context alongside reports. The insight is
+                illustrative and does not confirm that any road is damaged.
+              </p>
+              <a class="text-link" href="#live-map">
+                Explore map <span aria-hidden="true">→</span>
+              </a>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel authority-panel" id="authority-portal" aria-labelledby="authority-title">
+          <div class="panel-header authority-header">
+            <div>
+              <p class="eyebrow">REPAIR WORKFLOW</p>
+              <h2 id="authority-title">Authority portal</h2>
+              <p class="panel-subtitle">Review simulated reports and update their demo status</p>
+            </div>
+            <div class="authority-actions">
+              <label class="search-field" for="report-search">
+                <span aria-hidden="true">⌕</span>
+                <input
+                  id="report-search"
+                  type="search"
+                  placeholder="Search reports"
+                  autocomplete="off"
+                >
+              </label>
+              <button class="button button-secondary" id="export-reports" type="button">
+                Export demo data
+              </button>
+            </div>
+          </div>
+
+          <div class="table-wrap">
+            <table class="reports-table">
+              <caption class="visually-hidden">Simulated pothole reports and repair statuses</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Report ID</th>
+                  <th scope="col">Location</th>
+                  <th scope="col">Risk level</th>
+                  <th scope="col">Reported</th>
+                  <th scope="col">Status</th>
+                  <th scope="col"><span class="visually-hidden">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody id="reports-table-body">
+                <tr data-report-id="RG-1048">
+                  <td><span class="report-id">RG-1048</span></td>
+                  <td>
+                    <span class="table-location">Central Avenue</span>
+                    <span class="table-subtext">Demo location</span>
+                  </td>
+                  <td><span class="risk-badge risk-badge-high">High</span></td>
+                  <td>Today, 10:42</td>
+                  <td>
+                    <label class="visually-hidden" for="status-rg-1048">Status for report RG-1048</label>
+                    <select class="status-select" id="status-rg-1048" data-report-status>
+                      <option value="pending" selected>Pending review</option>
+                      <option value="assigned">Assigned</option>
+                      <option value="in-progress">In progress</option>
+                      <option value="repaired">Repaired</option>
+                    </select>
+                  </td>
+                  <td><button class="table-action" type="button" data-report-action="view">View</button></td>
+                </tr>
+
+                <tr data-report-id="RG-1047">
+                  <td><span class="report-id">RG-1047</span></td>
+                  <td>
+                    <span class="table-location">Riverside Road</span>
+                    <span class="table-subtext">Demo location</span>
+                  </td>
+                  <td><span class="risk-badge risk-badge-medium">Medium</span></td>
+                  <td>Today, 10:31</td>
+                  <td>
+                    <label class="visually-hidden" for="status-rg-1047">Status for report RG-1047</label>
+                    <select class="status-select" id="status-rg-1047" data-report-status>
+                      <option value="pending">Pending review</option>
+                      <option value="assigned" selected>Assigned</option>
+                      <option value="in-progress">In progress</option>
+                      <option value="repaired">Repaired</option>
+                    </select>
+                  </td>
+                  <td><button class="table-action" type="button" data-report-action="view">View</button></td>
+                </tr>
+
+                <tr data-report-id="RG-1046">
+                  <td><span class="report-id">RG-1046</span></td>
+                  <td>
+                    <span class="table-location">Market Street</span>
+                    <span class="table-subtext">Demo location</span>
+                  </td>
+                  <td><span class="risk-badge risk-badge-low">Low</span></td>
+                  <td>Yesterday, 16:08</td>
+                  <td>
+                    <label class="visually-hidden" for="status-rg-1046">Status for report RG-1046</label>
+                    <select class="status-select" id="status-rg-1046" data-report-status>
+                      <option value="pending">Pending review</option>
+                      <option value="assigned">Assigned</option>
+                      <option value="in-progress" selected>In progress</option>
+                      <option value="repaired">Repaired</option>
+                    </select>
+                  </td>
+                  <td><button class="table-action" type="button" data-report-action="view">View</button></td>
+                </tr>
+
+                <tr data-report-id="RG-1045">
+                  <td><span class="report-id">RG-1045</span></td>
+                  <td>
+                    <span class="table-location">North Loop Road</span>
+                    <span class="table-subtext">Demo location</span>
+                  </td>
+                  <td><span class="risk-badge risk-badge-high">High</span></td>
+                  <td>Yesterday, 14:25</td>
+                  <td>
+                    <label class="visually-hidden" for="status-rg-1045">Status for report RG-1045</label>
+                    <select class="status-select" id="status-rg-1045" data-report-status>
+                      <option value="pending">Pending review</option>
+                      <option value="assigned">Assigned</option>
+                      <option value="in-progress">In progress</option>
+                      <option value="repaired" selected>Repaired</option>
+                    </select>
+                  </td>
+                  <td><button class="table-action" type="button" data-report-action="view">View</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="table-footer">
+            <span id="report-count">Showing 4 simulated reports</span>
+            <button class="text-link-button" id="load-more-reports" type="button">
+              Load more demo reports <span aria-hidden="true">→</span>
+            </button>
+          </div>
+        </section>
+
+        <footer class="page-footer">
+          <span>RoadGuard · College ideathon prototype</span>
+          <span>Demo data only · Not for real-world navigation or emergency use</span>
+        </footer>
+      </main>
+    </div>
+  </div>
+</body>
+</html>
+```
